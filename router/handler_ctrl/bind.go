@@ -17,6 +17,7 @@
 package handler_ctrl
 
 import (
+	"github.com/openziti/ziti/common/datapipe"
 	"runtime/debug"
 	"time"
 
@@ -37,6 +38,7 @@ type bindHandler struct {
 	xgDialerPool             goroutines.Pool
 	terminatorValidationPool goroutines.Pool
 	ctrlAddressUpdater       CtrlAddressUpdater
+	dataPipeRegistry         *datapipe.Registry
 }
 
 func NewBindHandler(routerEnv env.RouterEnv, forwarder *forwarder.Forwarder, ctrlAddressUpdater CtrlAddressUpdater) (channel.BindHandler, error) {
@@ -82,6 +84,7 @@ func NewBindHandler(routerEnv env.RouterEnv, forwarder *forwarder.Forwarder, ctr
 		xgDialerPool:             xgDialerPool,
 		terminatorValidationPool: terminatorValidationPool,
 		ctrlAddressUpdater:       ctrlAddressUpdater,
+		dataPipeRegistry:         &datapipe.Registry{},
 	}, nil
 }
 
@@ -110,6 +113,14 @@ func (self *bindHandler) BindChannel(binding channel.Binding) error {
 	if self.env.GetTraceHandler() != nil {
 		binding.AddPeekHandler(self.env.GetTraceHandler())
 	}
+
+	sshTunnelRegistry := &pipeRegistry{}
+	sshTunnelRequestHandler := newCtrlPipeHandler(sshTunnelRegistry, binding.GetChannel())
+	binding.AddTypedReceiveHandler(&channel.AsyncFunctionReceiveAdapter{
+		Type:    sshTunnelRequestHandler.ContentType(),
+		Handler: sshTunnelRequestHandler.HandleReceive,
+	})
+	binding.AddTypedReceiveHandler(newCtrlPipeDataHandler(sshTunnelRegistry))
 
 	for _, x := range self.env.GetXrctrls() {
 		if err := binding.Bind(x); err != nil {
